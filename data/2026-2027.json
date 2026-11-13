@@ -1,0 +1,19 @@
+{
+  "tahun_ajaran": "2026/2027",
+  "slug": "2026-2027",
+  "status": "belum_dipublikasikan",
+  "sumber": {
+    "halaman": "https://disdik.jabarprov.go.id/publikasi/kalender-pendidikan",
+    "api": "https://api-webdisdik.jabarprov.go.id/next/api/v1/kalender",
+    "id": null,
+    "pembaruan_terakhir": null,
+    "dibuat": null
+  },
+  "dokumen": [],
+  "agenda": [],
+  "penilaian_akhir": [],
+  "catatan": [
+    "Belum ada data kalender untuk tahun ajaran ini di API."
+  ],
+  "diambil_pada": "2026-11-13T04:51:52Z"
+}

@@ -1,0 +1,28 @@
+{
+  "sumber": {
+    "halaman": "https://disdik.jabarprov.go.id/publikasi/kalender-pendidikan",
+    "api": "https://api-webdisdik.jabarprov.go.id/next/api/v1/kalender"
+  },
+  "diambil_pada": "2026-11-13T04:51:52Z",
+  "jumlah": 2,
+  "tahun_ajaran": [
+    {
+      "slug": "2026-2027",
+      "tahun_ajaran": "2026/2027",
+      "status": "belum_dipublikasikan",
+      "file": "data/2026-2027.json",
+      "jumlah_agenda": 0,
+      "jumlah_dokumen": 0,
+      "pembaruan_terakhir": null
+    },
+    {
+      "slug": "2025-2026",
+      "tahun_ajaran": "2025/2026",
+      "status": "tersedia",
+      "file": "data/2025-2026.json",
+      "jumlah_agenda": 49,
+      "jumlah_dokumen": 2,
+      "pembaruan_terakhir": "2026-07-31T07:48:44.532Z"
+    }
+  ]
+}
