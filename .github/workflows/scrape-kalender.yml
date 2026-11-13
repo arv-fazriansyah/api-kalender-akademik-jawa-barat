@@ -1,21 +1,16 @@
 name: Scrape Kalender Pendidikan Jabar
 
-# API Disdik Jabar dilindungi Cloudflare dan menolak request HTTP biasa dari
-# IP datacenter (runner GitHub Actions selalu kena 403 challenge).
+# API Disdik Jabar dilindungi Cloudflare dan menolak request dari IP datacenter
+# (runner GitHub Actions kena 403). Script otomatis mencari proxy gratis ber-IP
+# Indonesia lalu mencobanya sampai ada yang berhasil.
 #
-# Solusinya dua lapis:
-#   1. script/fetch-browser.py menjalankan Chromium sungguhan agar challenge
-#      Cloudflare selesai, lalu memanggil endpoint API dari dalam halaman.
-#   2. script/scrape-kalender.py memakai hasil itu sebagai cadangan saat
-#      request langsung gagal.
-#
-# Kalau punya proxy ber-IP Indonesia, cukup set secret HTTPS_PROXY dan
-# tambahkan blok schedule di bawah.
+# Kalau punya proxy tetap, set secret PROXY atau HTTPS_PROXY.
 
 on:
+  schedule:
+    # 01.00 WIB = 18.00 UTC hari sebelumnya
+    - cron: '0 18 * * *'
   workflow_dispatch:
-  # schedule:
-  #   - cron: '0 18 * * *'   # 01.00 WIB
 
 permissions:
   contents: write
@@ -27,6 +22,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,18 +33,11 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          playwright install --with-deps chromium
+        run: pip install -r requirements.txt
 
-      - name: Ambil data lewat browser (opsional)
-        continue-on-error: true
+      - name: Jalankan scraper
         env:
-          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
-        run: python script/fetch-browser.py
-
-      - name: Susun data JSON
-        env:
+          PROXY: ${{ secrets.PROXY }}
           HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
           TAHUN_AJARAN: ${{ vars.TAHUN_AJARAN }}
         run: python script/scrape-kalender.py

@@ -14,12 +14,15 @@ Catatan:
     Tahun ajaran berjalan otomatis dibuat sebagai placeholder berstatus
     "belum_dipublikasikan" sampai API menyediakannya. Gambar tidak diunduh.
 
-    Secara bawaan hanya tahun ajaran berjalan dan tahun sebelumnya yang
-    ditulis. Set TAHUN_AJARAN untuk memilih sendiri, mis. "2023-2024".
+    API dilindungi Cloudflare dan menolak IP datacenter asing (403). Karena
+    itu, kalau request langsung gagal, script mencari proxy gratis ber-IP
+    Indonesia lalu mencobanya satu per satu sampai ada yang berhasil.
 
 Pemakaian:
     python script/scrape-kalender.py
-    TAHUN_AJARAN=2025-2026,2026-2027 python script/scrape-kalender.py
+    python script/scrape-kalender.py --proxy http://ip:port
+    python script/scrape-kalender.py --cari-proxy        # hanya cari proxy
+    python script/scrape-kalender.py --tanpa-proxy       # jangan cari proxy
 """
 
 from __future__ import annotations
@@ -30,8 +33,10 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable
 
 import requests
 
@@ -42,6 +47,7 @@ STORAGE_BASE = "https://storagetikomdik.jabarprov.go.id/website-disdik-v2/"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 AGENDA_DIR = DATA_DIR / "agenda"
+CACHE_DIR = DATA_DIR / ".cache"
 
 HEADERS = {
     "User-Agent": (
@@ -56,7 +62,26 @@ HEADERS = {
 TIMEOUT = 30
 PERCOBAAN = 3
 
+# Sumber daftar proxy gratis (diutamakan yang ber-IP Indonesia).
+PROXY_SOURCES_ID = [
+    "https://api.proxyscrape.com/v4/free-proxy-list/get"
+    "?request=display_proxies&country=id&protocol=http&proxy_format=ipport&format=text",
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/ID/data.txt",
+    "https://proxylist.geonode.com/api/proxy-list"
+    "?limit=100&page=1&sort_by=lastChecked&sort_type=desc&protocols=http&country=ID",
+]
+PROXY_SOURCES_GLOBAL = [
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+]
 
+MAKS_PROXY_DIUJI = 150
+WAKER_UJI_PROXY = 24
+TIMEOUT_UJI_PROXY = 6
+
+
+# --------------------------------------------------------------------------- #
+# Util
+# --------------------------------------------------------------------------- #
 def slugify_tahun_ajaran(value: str) -> str | None:
     """'2025 -2026' atau '2025/2026' -> '2025-2026'."""
     match = re.search(r"(\d{4})\D*(\d{4})", str(value or ""))
@@ -81,34 +106,165 @@ def absolutize(url: str | None) -> str | None:
     return STORAGE_BASE + url.lstrip("/")
 
 
-def ambil_dari_api(raw_file: Path | None = None) -> list[dict]:
-    terakhir = None
+# --------------------------------------------------------------------------- #
+# Proxy gratis
+# --------------------------------------------------------------------------- #
+def _normalisasi_proxy(baris: str) -> str | None:
+    baris = baris.strip()
+    if not baris or baris.startswith("#"):
+        return None
+    if not baris.startswith(("http://", "https://")):
+        baris = "http://" + baris.lstrip("/")
+    if not re.match(r"^https?://\d{1,3}(\.\d{1,3}){3}:\d{2,5}$", baris):
+        return None
+    return baris
+
+
+def _parse_teks(teks: str) -> Iterable[str]:
+    for baris in teks.splitlines():
+        proxy = _normalisasi_proxy(baris)
+        if proxy:
+            yield proxy
+
+
+def _parse_geonode(teks: str) -> Iterable[str]:
+    try:
+        data = json.loads(teks).get("data") or []
+    except ValueError:
+        return []
+    hasil = []
+    for item in data:
+        ip, port = item.get("ip"), item.get("port")
+        if ip and port:
+            hasil.append(f"http://{ip}:{port}")
+    return hasil
+
+
+def kumpulkan_kandidat_proxy() -> list[str]:
+    kandidat: list[str] = []
+    for url in PROXY_SOURCES_ID:
+        try:
+            resp = requests.get(url, timeout=20, headers={"User-Agent": HEADERS["User-Agent"]})
+            resp.raise_for_status()
+            kandidat.extend(
+                _parse_geonode(resp.text) if "geonode" in url else _parse_teks(resp.text)
+            )
+        except requests.RequestException as exc:
+            print(f"  sumber proxy gagal ({url.split('/')[2]}): {exc}")
+
+    print(f"  {len(kandidat)} proxy Indonesia terkumpul")
+
+    if len(kandidat) < 20:
+        for url in PROXY_SOURCES_GLOBAL:
+            try:
+                resp = requests.get(url, timeout=20, headers={"User-Agent": HEADERS["User-Agent"]})
+                resp.raise_for_status()
+                tambahan = list(_parse_teks(resp.text))[:300]
+                kandidat.extend(tambahan)
+                print(f"  tambahan {len(tambahan)} proxy global dari {url.split('/')[2]}")
+            except requests.RequestException as exc:
+                print(f"  sumber proxy gagal ({url.split('/')[2]}): {exc}")
+
+    # buang duplikat, pertahankan urutan
+    unik: list[str] = []
+    sudah = set()
+    for proxy in kandidat:
+        if proxy not in sudah:
+            sudah.add(proxy)
+            unik.append(proxy)
+    return unik[:MAKS_PROXY_DIUJI]
+
+
+def _uji_satu_proxy(proxy: str) -> str | None:
+    try:
+        resp = requests.get(
+            API_URL,
+            headers=HEADERS,
+            proxies={"http": proxy, "https": proxy},
+            timeout=TIMEOUT_UJI_PROXY,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json().get("data")
+        return proxy if isinstance(data, list) else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def cari_proxy() -> str | None:
+    print("Mencari proxy gratis ber-IP Indonesia...")
+    kandidat = kumpulkan_kandidat_proxy()
+    if not kandidat:
+        return None
+
+    print(f"  menguji {len(kandidat)} proxy (timeout {TIMEOUT_UJI_PROXY}s, {WAKER_UJI_PROXY} paralel)")
+    mulai = time.time()
+    with ThreadPoolExecutor(max_workers=WAKER_UJI_PROXY) as pool:
+        futures = {pool.submit(_uji_satu_proxy, p): p for p in kandidat}
+        for future in as_completed(futures):
+            hasil = future.result()
+            if hasil:
+                for lain in futures:
+                    lain.cancel()
+                print(f"  proxy hidup: {hasil} ({time.time() - mulai:.1f}s)")
+                return hasil
+    print(f"  tidak ada proxy yang hidup ({time.time() - mulai:.1f}s)")
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Ambil data
+# --------------------------------------------------------------------------- #
+def _ambil(proxy: str | None) -> list[dict]:
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    resp = requests.get(
+        API_URL, headers=HEADERS, proxies=proxies, timeout=20 if proxy else TIMEOUT
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    data = payload.get("data")
+    return data if isinstance(data, list) else []
+
+
+def ambil_dari_api(proxy: str | None = None, cari_proxy_otomatis: bool = True) -> tuple[list[dict], str | None]:
+    """Kembalikan (data, proxy yang dipakai)."""
+    terakhir: Exception | str | None = None
+
     for percobaan in range(1, PERCOBAAN + 1):
         try:
-            resp = requests.get(API_URL, headers=HEADERS, timeout=TIMEOUT)
-            resp.raise_for_status()
-            payload = resp.json()
-            data = payload.get("data")
-            return data if isinstance(data, list) else []
+            return _ambil(proxy), proxy
         except (requests.RequestException, ValueError) as exc:
             terakhir = exc
             print(f"  percobaan {percobaan}/{PERCOBAAN} gagal: {exc}")
             if percobaan < PERCOBAAN:
-                time.sleep(5 * percobaan)
+                time.sleep(3 * percobaan)
 
-    # Cadangan: hasil tangkapan browser (script/fetch-browser.py).
-    if raw_file and raw_file.exists():
-        print(f"  memakai hasil browser: {raw_file}")
-        try:
-            payload = json.loads(raw_file.read_text(encoding="utf-8"))
-        except ValueError as exc:
-            raise SystemExit(f"File cadangan tidak valid: {exc}")
-        data = payload.get("data")
-        return data if isinstance(data, list) else []
+    if not cari_proxy_otomatis:
+        raise SystemExit(f"Gagal mengambil API: {terakhir}")
 
-    raise SystemExit(f"Gagal mengambil API: {terakhir}")
+    # Proxy gratis sering mati. Kalau yang pertama gagal, cari lagi (maks 3 putaran).
+    for putaran in range(1, 4):
+        proxy = cari_proxy()
+        if not proxy:
+            continue
+        for percobaan in range(1, 3):
+            try:
+                return _ambil(proxy), proxy
+            except (requests.RequestException, ValueError) as exc:
+                terakhir = exc
+                print(f"  proxy {proxy} gagal dipakai: {exc}")
+                time.sleep(3)
+
+    raise SystemExit(
+        f"Gagal mengambil API: {terakhir}\n"
+        "Proxy gratis tidak ada yang berhasil. Set PROXY=http://ip:port atau HTTPS_PROXY "
+        "dengan proxy ber-IP Indonesia."
+    )
 
 
+# --------------------------------------------------------------------------- #
+# Susun data
+# --------------------------------------------------------------------------- #
 def baca_agenda_kurasi(slug: str) -> dict:
     file = AGENDA_DIR / f"{slug}.json"
     if not file.exists():
@@ -177,10 +333,7 @@ def tulis_json(file: Path, data: dict) -> None:
 
 
 def tulis_json_jika_berubah(file: Path, data: dict) -> bool:
-    """Tulis hanya kalau isi berubah (field diambil_pada diabaikan).
-
-    Tujuannya agar commit harian tidak dibuat saat data memang belum berubah.
-    """
+    """Tulis hanya kalau isi berubah (field diambil_pada diabaikan)."""
     if file.exists():
         try:
             lama = json.loads(file.read_text(encoding="utf-8"))
@@ -194,17 +347,28 @@ def tulis_json_jika_berubah(file: Path, data: dict) -> bool:
     return True
 
 
+def simpan_proxy_terakhir(proxy: str) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (CACHE_DIR / "proxy.txt").write_text(proxy + "\n", encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scrape kalender pendidikan Jabar.")
-    parser.add_argument(
-        "--raw",
-        default="data/.cache/api-kalender.json",
-        help="JSON mentah cadangan bila request langsung diblokir (default: data/.cache/api-kalender.json)",
-    )
+    parser.add_argument("--proxy", help="pakai proxy tertentu, contoh http://1.2.3.4:8080")
+    parser.add_argument("--tanpa-proxy", action="store_true", help="jangan cari proxy otomatis")
+    parser.add_argument("--cari-proxy", action="store_true", help="hanya cari dan uji proxy, tanpa scrape")
     args = parser.parse_args()
-    raw_file = Path(args.raw)
-    if not raw_file.is_absolute():
-        raw_file = ROOT_DIR / raw_file
+
+    if args.cari_proxy:
+        proxy = args.proxy or os.environ.get("PROXY") or cari_proxy()
+        if not proxy:
+            print("Tidak ada proxy yang berhasil.")
+            return 1
+        print(f"Proxy yang bisa dipakai: {proxy}")
+        return 0
 
     diambil_pada = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     berjalan = tahun_ajaran_berjalan()
@@ -213,9 +377,16 @@ def main() -> int:
     env_filter = os.environ.get("TAHUN_AJARAN", "").strip()
     filter_tahun = [s.strip() for s in env_filter.split(",") if s.strip()] or bawaan
 
+    proxy = args.proxy or os.environ.get("PROXY") or None
+
     print(f"Mengambil {API_URL}")
-    items = ambil_dari_api(raw_file)
+    items, proxy_dipakai = ambil_dari_api(
+        proxy=proxy, cari_proxy_otomatis=not args.tanpa_proxy
+    )
     print(f"API mengembalikan {len(items)} tahun ajaran")
+    if proxy_dipakai:
+        print(f"  lewat proxy: {proxy_dipakai}")
+        simpan_proxy_terakhir(proxy_dipakai)
 
     entri: dict[str, dict] = {}
     for item in items:

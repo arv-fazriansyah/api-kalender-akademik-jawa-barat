@@ -98,11 +98,11 @@ data/
   agenda/
     2025-2026.json         agenda kurasi (sumber penggabungan)
 script/
-  scrape-kalender.py       scraper
+  scrape-kalender.py       scraper (satu-satunya script)
   run-daily.ps1            scrape + commit + push (Windows)
   register-task.ps1        daftarkan jadwal harian 01.00
 .github/workflows/
-  scrape-kalender.yml      jalankan manual (workflow_dispatch)
+  scrape-kalender.yml      jadwal harian 01.00 WIB
 ```
 
 ---
@@ -110,9 +110,9 @@ script/
 ## Cara kerja
 
 1. `script/scrape-kalender.py` memanggil API publik Disdik Jawa Barat.
-2. Metadata (id, tahun ajaran, tautan poster) digabungkan dengan agenda kurasi di `data/agenda/`.
-3. Hasil ditulis ke `data/kalender.json` dan `data/<tahun>-<tahun>.json`. File hanya ditulis ulang kalau isinya berubah, jadi tidak ada commit kosong.
-4. Windows Task Scheduler menjalankan proses ini setiap hari pukul 01.00 lalu push ke repo.
+2. Kalau request langsung ditolak (HTTP 403 dari Cloudflare), script otomatis mengambil daftar proxy gratis ber-IP Indonesia, mengujinya paralel, lalu memakai yang hidup.
+3. Metadata (id, tahun ajaran, tautan poster) digabungkan dengan agenda kurasi di `data/agenda/`.
+4. Hasil ditulis ke `data/kalender.json` dan `data/<tahun>-<tahun>.json`. File hanya ditulis ulang kalau isinya berubah, jadi tidak ada commit kosong.
 
 Menjalankan manual:
 
@@ -120,11 +120,20 @@ Menjalankan manual:
 pip install requests
 python script/scrape-kalender.py
 
+# cari proxy Indonesia yang hidup saja
+python script/scrape-kalender.py --cari-proxy
+
+# pakai proxy tertentu
+python script/scrape-kalender.py --proxy http://1.2.3.4:8080
+
+# paksa tanpa proxy (gagal kalau IP diblokir)
+python script/scrape-kalender.py --tanpa-proxy
+
 # hanya tahun ajaran tertentu
 TAHUN_AJARAN=2025-2026,2026-2027 python script/scrape-kalender.py
 ```
 
-Memasang jadwal harian di Windows:
+Memasang jadwal harian di Windows (opsional, cadangan kalau proxy gratis sedang mati):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File script\register-task.ps1
@@ -133,16 +142,19 @@ Start-ScheduledTask -TaskName "Kalender Jabar Scrape"   # uji sekali
 
 Log tersimpan di `logs/scrape-YYYY-MM.log`.
 
-### Kenapa bukan cron GitHub Actions
+### Soal Cloudflare
 
-API Disdik dilindungi Cloudflare dan menolak permintaan dari IP datacenter luar negeri.
-Runner GitHub Actions selalu mendapat **HTTP 403** (halaman challenge), sementara
-permintaan dari koneksi rumah di Indonesia berhasil. Enam proxy publik dan proxy
-Google Translate sudah diuji, semuanya gagal.
+API Disdik dilindungi Cloudflare dan menolak permintaan dari IP datacenter luar
+negeri, termasuk runner GitHub Actions (selalu **HTTP 403**). Request dari koneksi
+rumah di Indonesia berhasil.
 
-Workflow `.github/workflows/scrape-kalender.yml` tetap ada untuk dijalankan manual
-(`workflow_dispatch`). Kalau punya proxy ber-IP Indonesia, set secret `HTTPS_PROXY`
-lalu tambahkan blok `schedule` di workflow tersebut.
+Karena itu script memakai jalur cadangan proxy gratis ber-IP Indonesia
+(proxyscrape, proxifly, geonode). Kalau punya proxy tetap, set secret `PROXY`
+atau `HTTPS_PROXY` — nilainya dipakai lebih dulu sebelum pencarian otomatis.
+
+Catatan: proxy gratis bisa mati kapan saja. Kalau workflow gagal, jalankan
+Task Scheduler lokal atau isi `PROXY` dengan proxy langganan.
+
 
 ---
 
