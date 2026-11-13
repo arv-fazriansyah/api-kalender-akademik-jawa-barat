@@ -24,6 +24,7 @@ Pemakaian:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -80,7 +81,7 @@ def absolutize(url: str | None) -> str | None:
     return STORAGE_BASE + url.lstrip("/")
 
 
-def ambil_dari_api() -> list[dict]:
+def ambil_dari_api(raw_file: Path | None = None) -> list[dict]:
     terakhir = None
     for percobaan in range(1, PERCOBAAN + 1):
         try:
@@ -94,6 +95,17 @@ def ambil_dari_api() -> list[dict]:
             print(f"  percobaan {percobaan}/{PERCOBAAN} gagal: {exc}")
             if percobaan < PERCOBAAN:
                 time.sleep(5 * percobaan)
+
+    # Cadangan: hasil tangkapan browser (script/fetch-browser.py).
+    if raw_file and raw_file.exists():
+        print(f"  memakai hasil browser: {raw_file}")
+        try:
+            payload = json.loads(raw_file.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise SystemExit(f"File cadangan tidak valid: {exc}")
+        data = payload.get("data")
+        return data if isinstance(data, list) else []
+
     raise SystemExit(f"Gagal mengambil API: {terakhir}")
 
 
@@ -183,6 +195,17 @@ def tulis_json_jika_berubah(file: Path, data: dict) -> bool:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Scrape kalender pendidikan Jabar.")
+    parser.add_argument(
+        "--raw",
+        default="data/.cache/api-kalender.json",
+        help="JSON mentah cadangan bila request langsung diblokir (default: data/.cache/api-kalender.json)",
+    )
+    args = parser.parse_args()
+    raw_file = Path(args.raw)
+    if not raw_file.is_absolute():
+        raw_file = ROOT_DIR / raw_file
+
     diambil_pada = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     berjalan = tahun_ajaran_berjalan()
     awal = int(berjalan.split("-")[0])
@@ -191,7 +214,7 @@ def main() -> int:
     filter_tahun = [s.strip() for s in env_filter.split(",") if s.strip()] or bawaan
 
     print(f"Mengambil {API_URL}")
-    items = ambil_dari_api()
+    items = ambil_dari_api(raw_file)
     print(f"API mengembalikan {len(items)} tahun ajaran")
 
     entri: dict[str, dict] = {}

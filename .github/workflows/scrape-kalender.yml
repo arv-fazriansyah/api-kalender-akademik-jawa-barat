@@ -1,19 +1,21 @@
 name: Scrape Kalender Pendidikan Jabar
 
-# Jadwal harian 01.00 WIB TIDAK bisa dipakai di sini.
-# API Disdik Jabar dilindungi Cloudflare dan menolak (HTTP 403) permintaan dari
-# IP datacenter luar negeri, termasuk runner GitHub Actions. Semua proxy publik
-# dan proxy Google Translate sudah diuji dan gagal.
+# API Disdik Jabar dilindungi Cloudflare dan menolak request HTTP biasa dari
+# IP datacenter (runner GitHub Actions selalu kena 403 challenge).
 #
-# Scrape harian dijalankan di mesin ber-IP Indonesia lewat:
-#   script/run-daily.ps1  +  script/register-task.ps1  (Windows Task Scheduler)
+# Solusinya dua lapis:
+#   1. script/fetch-browser.py menjalankan Chromium sungguhan agar challenge
+#      Cloudflare selesai, lalu memanggil endpoint API dari dalam halaman.
+#   2. script/scrape-kalender.py memakai hasil itu sebagai cadangan saat
+#      request langsung gagal.
 #
-# Workflow ini disisakan untuk dijalankan manual, atau otomatis kalau nanti
-# memakai proxy Indonesia:
-#   set secret HTTPS_PROXY lalu tambahkan blok schedule di bawah.
+# Kalau punya proxy ber-IP Indonesia, cukup set secret HTTPS_PROXY dan
+# tambahkan blok schedule di bawah.
 
 on:
   workflow_dispatch:
+  # schedule:
+  #   - cron: '0 18 * * *'   # 01.00 WIB
 
 permissions:
   contents: write
@@ -35,9 +37,17 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
 
-      - name: Jalankan scraper
+      - name: Ambil data lewat browser (opsional)
+        continue-on-error: true
+        env:
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
+        run: python script/fetch-browser.py
+
+      - name: Susun data JSON
         env:
           HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
           TAHUN_AJARAN: ${{ vars.TAHUN_AJARAN }}
