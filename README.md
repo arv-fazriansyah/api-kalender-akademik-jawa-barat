@@ -107,10 +107,9 @@ script/
 
 ## Cara kerja
 
-1. `script/scrape-kalender.py` memanggil API publik Disdik Jawa Barat.
-2. Kalau request langsung ditolak (HTTP 403 dari Cloudflare), script otomatis mengambil daftar proxy gratis ber-IP Indonesia, mengujinya paralel, lalu memakai yang hidup.
-3. Metadata (id, tahun ajaran, tautan poster) digabungkan dengan agenda kurasi di `data/agenda/`.
-4. Hasil ditulis ke `data/kalender.json` dan `data/<tahun>-<tahun>.json`. File hanya ditulis ulang kalau isinya berubah, jadi tidak ada commit kosong.
+1. `script/scrape-kalender.py` mencari proxy gratis ber-IP Indonesia, mengujinya paralel, lalu memakainya untuk memanggil API Disdik. Koneksi langsung hanya dipakai kalau semua proxy gagal.
+2. Metadata (id, tahun ajaran, tautan poster) digabungkan dengan agenda kurasi di `data/agenda/`.
+3. Hasil ditulis ke `data/kalender.json` dan `data/<tahun>-<tahun>.json`. File hanya ditulis ulang kalau isinya berubah, jadi tidak ada commit kosong.
 
 Menjalankan manual:
 
@@ -137,9 +136,11 @@ API Disdik dilindungi Cloudflare dan menolak permintaan dari IP datacenter luar
 negeri, termasuk runner GitHub Actions (selalu **HTTP 403**). Request dari koneksi
 rumah di Indonesia berhasil.
 
-Karena itu script memakai jalur cadangan proxy gratis ber-IP Indonesia
-(proxyscrape, proxifly, geonode). Kalau punya proxy tetap, set secret `PROXY`
-atau `HTTPS_PROXY` — nilainya dipakai lebih dulu sebelum pencarian otomatis.
+Karena itu script **langsung** memakai proxy gratis ber-IP Indonesia
+(proxyscrape, proxifly, geonode), bukan mencoba koneksi langsung lebih dulu.
+Kalau punya proxy tetap, set secret `PROXY` atau `HTTPS_PROXY` — nilainya dipakai
+paling awal sebelum pencarian otomatis. Koneksi langsung hanya jadi cadangan
+terakhir kalau semua proxy mati.
 
 Catatan: proxy gratis bisa mati kapan saja. Kalau workflow gagal, isi `PROXY`
 dengan proxy langganan atau jalankan script ini manual dari jaringan Indonesia.

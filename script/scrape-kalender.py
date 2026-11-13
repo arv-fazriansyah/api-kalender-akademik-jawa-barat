@@ -15,8 +15,8 @@ Catatan:
     "belum_dipublikasikan" sampai API menyediakannya. Gambar tidak diunduh.
 
     API dilindungi Cloudflare dan menolak IP datacenter asing (403). Karena
-    itu, kalau request langsung gagal, script mencari proxy gratis ber-IP
-    Indonesia lalu mencobanya satu per satu sampai ada yang berhasil.
+    itu script langsung memakai proxy gratis ber-IP Indonesia; koneksi
+    langsung hanya dipakai sebagai cadangan terakhir.
 
 Pemakaian:
     python script/scrape-kalender.py
@@ -226,39 +226,48 @@ def _ambil(proxy: str | None) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
-def ambil_dari_api(proxy: str | None = None, cari_proxy_otomatis: bool = True) -> tuple[list[dict], str | None]:
-    """Kembalikan (data, proxy yang dipakai)."""
-    terakhir: Exception | str | None = None
-
-    for percobaan in range(1, PERCOBAAN + 1):
+def _coba(url_proxy: str | None, label: str, percobaan: int = 2) -> list[dict] | None:
+    for i in range(1, percobaan + 1):
         try:
-            return _ambil(proxy), proxy
+            return _ambil(url_proxy)
         except (requests.RequestException, ValueError) as exc:
-            terakhir = exc
-            print(f"  percobaan {percobaan}/{PERCOBAAN} gagal: {exc}")
-            if percobaan < PERCOBAAN:
-                time.sleep(3 * percobaan)
+            print(f"  {label} percobaan {i}/{percobaan} gagal: {exc}")
+            if i < percobaan:
+                time.sleep(2)
+    return None
 
-    if not cari_proxy_otomatis:
-        raise SystemExit(f"Gagal mengambil API: {terakhir}")
 
-    # Proxy gratis sering mati. Kalau yang pertama gagal, cari lagi (maks 3 putaran).
-    for putaran in range(1, 4):
-        proxy = cari_proxy()
-        if not proxy:
-            continue
-        for percobaan in range(1, 3):
-            try:
-                return _ambil(proxy), proxy
-            except (requests.RequestException, ValueError) as exc:
-                terakhir = exc
-                print(f"  proxy {proxy} gagal dipakai: {exc}")
-                time.sleep(3)
+def ambil_dari_api(proxy: str | None = None, cari_proxy_otomatis: bool = True) -> tuple[list[dict], str | None]:
+    """Kembalikan (data, proxy yang dipakai).
+
+    Urutan: proxy yang diberikan -> proxy gratis hasil pencarian -> koneksi langsung.
+    """
+    if proxy:
+        data = _coba(proxy, f"proxy {proxy}", PERCOBAAN)
+        if data is not None:
+            return data, proxy
+        if not cari_proxy_otomatis:
+            raise SystemExit(f"Gagal mengambil API lewat proxy {proxy}")
+        print("  proxy yang diberikan gagal, mencari proxy lain")
+
+    if cari_proxy_otomatis:
+        # Proxy gratis sering mati, jadi dicari ulang kalau yang didapat tidak jalan.
+        for putaran in range(1, 4):
+            kandidat = cari_proxy()
+            if not kandidat:
+                continue
+            data = _coba(kandidat, f"proxy {kandidat}")
+            if data is not None:
+                return data, kandidat
+        print("  semua proxy gagal, mencoba koneksi langsung")
+
+    data = _coba(None, "koneksi langsung", PERCOBAAN)
+    if data is not None:
+        return data, None
 
     raise SystemExit(
-        f"Gagal mengambil API: {terakhir}\n"
-        "Proxy gratis tidak ada yang berhasil. Set PROXY=http://ip:port atau HTTPS_PROXY "
-        "dengan proxy ber-IP Indonesia."
+        "Gagal mengambil API, baik lewat proxy maupun langsung.\n"
+        "Set PROXY=http://ip:port atau HTTPS_PROXY dengan proxy ber-IP Indonesia."
     )
 
 
