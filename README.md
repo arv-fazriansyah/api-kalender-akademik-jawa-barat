@@ -98,9 +98,7 @@ data/
   agenda/
     2025-2026.json         agenda kurasi (sumber penggabungan)
 script/
-  scrape-kalender.py       scraper (satu-satunya script)
-  run-daily.ps1            scrape + commit + push (Windows)
-  register-task.ps1        daftarkan jadwal harian 01.00
+  scrape-kalender.py       scraper
 .github/workflows/
   scrape-kalender.yml      jadwal harian 01.00 WIB
 ```
@@ -133,15 +131,6 @@ python script/scrape-kalender.py --tanpa-proxy
 TAHUN_AJARAN=2025-2026,2026-2027 python script/scrape-kalender.py
 ```
 
-Memasang jadwal harian di Windows (opsional, cadangan kalau proxy gratis sedang mati):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File script\register-task.ps1
-Start-ScheduledTask -TaskName "Kalender Jabar Scrape"   # uji sekali
-```
-
-Log tersimpan di `logs/scrape-YYYY-MM.log`.
-
 ### Soal Cloudflare
 
 API Disdik dilindungi Cloudflare dan menolak permintaan dari IP datacenter luar
@@ -152,8 +141,8 @@ Karena itu script memakai jalur cadangan proxy gratis ber-IP Indonesia
 (proxyscrape, proxifly, geonode). Kalau punya proxy tetap, set secret `PROXY`
 atau `HTTPS_PROXY` — nilainya dipakai lebih dulu sebelum pencarian otomatis.
 
-Catatan: proxy gratis bisa mati kapan saja. Kalau workflow gagal, jalankan
-Task Scheduler lokal atau isi `PROXY` dengan proxy langganan.
+Catatan: proxy gratis bisa mati kapan saja. Kalau workflow gagal, isi `PROXY`
+dengan proxy langganan atau jalankan script ini manual dari jaringan Indonesia.
 
 
 ---
