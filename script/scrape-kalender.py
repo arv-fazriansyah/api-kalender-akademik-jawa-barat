@@ -164,6 +164,24 @@ def tulis_json(file: Path, data: dict) -> None:
     file.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def tulis_json_jika_berubah(file: Path, data: dict) -> bool:
+    """Tulis hanya kalau isi berubah (field diambil_pada diabaikan).
+
+    Tujuannya agar commit harian tidak dibuat saat data memang belum berubah.
+    """
+    if file.exists():
+        try:
+            lama = json.loads(file.read_text(encoding="utf-8"))
+            lama_isi = {k: v for k, v in lama.items() if k != "diambil_pada"}
+            baru_isi = {k: v for k, v in data.items() if k != "diambil_pada"}
+            if lama_isi == baru_isi:
+                return False
+        except ValueError:
+            pass
+    tulis_json(file, data)
+    return True
+
+
 def main() -> int:
     diambil_pada = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     berjalan = tahun_ajaran_berjalan()
@@ -189,12 +207,14 @@ def main() -> int:
         raise SystemExit(f"Tidak ada tahun ajaran yang cocok: {', '.join(filter_tahun)}")
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    jumlah_berubah = 0
     for data in urut:
         file = DATA_DIR / f"{data['slug']}.json"
-        tulis_json(file, data)
+        berubah = tulis_json_jika_berubah(file, data)
+        jumlah_berubah += int(berubah)
         print(
             f"  {file.name}  ({data['status']}, {len(data['agenda'])} agenda, "
-            f"{len(data['dokumen'])} dokumen)"
+            f"{len(data['dokumen'])} dokumen, {'diperbarui' if berubah else 'tidak berubah'})"
         )
 
     indeks = {
@@ -214,8 +234,8 @@ def main() -> int:
             for e in urut
         ],
     }
-    tulis_json(DATA_DIR / "kalender.json", indeks)
-    print("  kalender.json (indeks)")
+    tulis_json_jika_berubah(DATA_DIR / "kalender.json", indeks)
+    print(f"  kalender.json (indeks, {jumlah_berubah} file tahun ajaran diperbarui)")
     return 0
 
 

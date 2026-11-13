@@ -1,9 +1,18 @@
 name: Scrape Kalender Pendidikan Jabar
 
+# Jadwal harian 01.00 WIB TIDAK bisa dipakai di sini.
+# API Disdik Jabar dilindungi Cloudflare dan menolak (HTTP 403) permintaan dari
+# IP datacenter luar negeri, termasuk runner GitHub Actions. Semua proxy publik
+# dan proxy Google Translate sudah diuji dan gagal.
+#
+# Scrape harian dijalankan di mesin ber-IP Indonesia lewat:
+#   script/run-daily.ps1  +  script/register-task.ps1  (Windows Task Scheduler)
+#
+# Workflow ini disisakan untuk dijalankan manual, atau otomatis kalau nanti
+# memakai proxy Indonesia:
+#   set secret HTTPS_PROXY lalu tambahkan blok schedule di bawah.
+
 on:
-  schedule:
-    # 01:00 WIB = 18:00 UTC hari sebelumnya
-    - cron: '0 18 * * *'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +38,9 @@ jobs:
         run: pip install requests
 
       - name: Jalankan scraper
+        env:
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
+          TAHUN_AJARAN: ${{ vars.TAHUN_AJARAN }}
         run: python script/scrape-kalender.py
 
       - name: Commit hasil

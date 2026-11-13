@@ -2,7 +2,6 @@
 
 Data **Kalender Pendidikan Dinas Pendidikan Provinsi Jawa Barat** dalam bentuk JSON statis.
 Diperbarui otomatis setiap hari pukul **01.00 WIB** langsung dari sumber resmi.
-
 ---
 
 ## Endpoint
@@ -100,8 +99,10 @@ data/
     2025-2026.json         agenda kurasi (sumber penggabungan)
 script/
   scrape-kalender.py       scraper
+  run-daily.ps1            scrape + commit + push (Windows)
+  register-task.ps1        daftarkan jadwal harian 01.00
 .github/workflows/
-  scrape-kalender.yml      penjadwal harian
+  scrape-kalender.yml      jalankan manual (workflow_dispatch)
 ```
 
 ---
@@ -110,8 +111,8 @@ script/
 
 1. `script/scrape-kalender.py` memanggil API publik Disdik Jawa Barat.
 2. Metadata (id, tahun ajaran, tautan poster) digabungkan dengan agenda kurasi di `data/agenda/`.
-3. Hasil ditulis ke `data/kalender.json` dan `data/<tahun>-<tahun>.json`.
-4. GitHub Actions menjalankan proses ini setiap hari dan meng-commit perubahan.
+3. Hasil ditulis ke `data/kalender.json` dan `data/<tahun>-<tahun>.json`. File hanya ditulis ulang kalau isinya berubah, jadi tidak ada commit kosong.
+4. Windows Task Scheduler menjalankan proses ini setiap hari pukul 01.00 lalu push ke repo.
 
 Menjalankan manual:
 
@@ -122,6 +123,26 @@ python script/scrape-kalender.py
 # hanya tahun ajaran tertentu
 TAHUN_AJARAN=2025-2026,2026-2027 python script/scrape-kalender.py
 ```
+
+Memasang jadwal harian di Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File script\register-task.ps1
+Start-ScheduledTask -TaskName "Kalender Jabar Scrape"   # uji sekali
+```
+
+Log tersimpan di `logs/scrape-YYYY-MM.log`.
+
+### Kenapa bukan cron GitHub Actions
+
+API Disdik dilindungi Cloudflare dan menolak permintaan dari IP datacenter luar negeri.
+Runner GitHub Actions selalu mendapat **HTTP 403** (halaman challenge), sementara
+permintaan dari koneksi rumah di Indonesia berhasil. Enam proxy publik dan proxy
+Google Translate sudah diuji, semuanya gagal.
+
+Workflow `.github/workflows/scrape-kalender.yml` tetap ada untuk dijalankan manual
+(`workflow_dispatch`). Kalau punya proxy ber-IP Indonesia, set secret `HTTPS_PROXY`
+lalu tambahkan blok `schedule` di workflow tersebut.
 
 ---
 
