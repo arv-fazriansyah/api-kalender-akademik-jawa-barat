@@ -62,7 +62,7 @@ console.log(indeks.tahun_ajaran);
 
 | Field | Tipe | Keterangan |
 | --- | --- | --- |
-| `tahun_ajaran` | string | Contoh `2025/2026` |
+| `tahun_ajaran` | string | Format `YYYY/YYYY` |
 | `slug` | string | Nama file, contoh `2025-2026` |
 | `status` | string | `tersedia` atau `belum_dipublikasikan` |
 | `sumber` | object | Halaman, API, id, `pembaruan_terakhir`, `dibuat` |
