@@ -74,9 +74,9 @@ PROXY_SOURCES_GLOBAL = [
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
 ]
 
-MAKS_PROXY_DIUJI = 150
+MAKS_PROXY_DIUJI = 60
 WAKER_UJI_PROXY = 24
-TIMEOUT_UJI_PROXY = 6
+TIMEOUT_UJI_PROXY = 4
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +104,57 @@ def absolutize(url: str | None) -> str | None:
     if re.match(r"^https?://", url, re.I):
         return url
     return STORAGE_BASE + url.lstrip("/")
+
+
+POLA_TAHUN_AJARAN = re.compile(r"^(\d{4})\D*(\d{4})$")
+
+
+def validasi_items(items: list[dict]) -> None:
+    """Tolak data yang bentuknya tidak wajar sebelum ditulis ke repo.
+
+    Yang diperiksa: jumlah data, pola tahun ajaran, rentang dua tahun yang
+    berurutan, dan tautan poster harus dari storage resmi Disdik.
+    """
+    if not items:
+        raise SystemExit("Validasi gagal: API mengembalikan data kosong.")
+
+    masalah: list[str] = []
+    valid = 0
+
+    for nomor, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            masalah.append(f"item #{nomor}: bukan object")
+            continue
+
+        tahun = str(item.get("tahun_ajaran") or "").strip()
+        cocok = POLA_TAHUN_AJARAN.match(tahun)
+        if not cocok:
+            masalah.append(f"item #{nomor}: tahun_ajaran tidak valid ({tahun!r})")
+            continue
+        awal, akhir = int(cocok.group(1)), int(cocok.group(2))
+        if akhir != awal + 1:
+            masalah.append(f"item #{nomor}: rentang tahun tidak wajar ({tahun!r})")
+            continue
+
+        tautan_buruk = []
+        for key in ("image_1", "image_2"):
+            url = absolutize(item.get(key))
+            if url and not url.startswith(STORAGE_BASE):
+                tautan_buruk.append(f"{key}={url}")
+        if tautan_buruk:
+            masalah.append(f"item #{nomor}: tautan bukan dari storage resmi ({', '.join(tautan_buruk)})")
+            continue
+
+        valid += 1
+
+    if masalah:
+        rincian = "\n  - ".join(masalah[:10])
+        sisa = len(masalah) - 10
+        if sisa > 0:
+            rincian += f"\n  - ... dan {sisa} masalah lain"
+        raise SystemExit(f"Validasi respons gagal, data tidak ditulis:\n  - {rincian}")
+
+    print(f"  validasi lolos: {valid} tahun ajaran, tautan poster dari storage resmi")
 
 
 # --------------------------------------------------------------------------- #
@@ -218,7 +269,7 @@ def cari_proxy() -> str | None:
 def _ambil(proxy: str | None) -> list[dict]:
     proxies = {"http": proxy, "https": proxy} if proxy else None
     resp = requests.get(
-        API_URL, headers=HEADERS, proxies=proxies, timeout=20 if proxy else TIMEOUT
+        API_URL, headers=HEADERS, proxies=proxies, timeout=15 if proxy else TIMEOUT
     )
     resp.raise_for_status()
     payload = resp.json()
@@ -393,6 +444,7 @@ def main() -> int:
         proxy=proxy, cari_proxy_otomatis=not args.tanpa_proxy
     )
     print(f"API mengembalikan {len(items)} tahun ajaran")
+    validasi_items(items)
     if proxy_dipakai:
         print(f"  lewat proxy: {proxy_dipakai}")
         simpan_proxy_terakhir(proxy_dipakai)
